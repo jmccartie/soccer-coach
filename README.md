@@ -32,3 +32,7 @@ Everything persists in `localStorage` under the key `soccer-coach-state-v1`. Cle
 ## Dependencies
 
 - [SortableJS](https://sortablejs.github.io/Sortable/) via CDN for drag-and-drop.
+
+## Coaching Staff
+
+Built with [Claude Code](https://claude.com/claude-code) — an assistant coach who never asks for orange slices.
