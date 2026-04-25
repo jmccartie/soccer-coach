@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Soccer Coach</title>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f4f5f7;
+    color: #1f2937;
+    -webkit-user-select: none; user-select: none;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; height: 100vh; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: #1f2937; color: white;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .actions { display: flex; gap: 8px; }
+
+  button {
+    font: inherit; font-size: 15px; font-weight: 500;
+    padding: 10px 14px; border: none; border-radius: 8px;
+    background: #3b82f6; color: white; cursor: pointer;
+    min-height: 40px;
+  }
+  button.secondary { background: #6b7280; }
+  button.danger { background: #dc2626; }
+  button:active { opacity: 0.8; }
+
+  .controls {
+    display: flex; gap: 8px; padding: 10px 16px;
+    background: white; border-bottom: 1px solid #e5e7eb;
+    flex-wrap: wrap;
+  }
+  .controls input {
+    flex: 1; min-width: 180px; font: inherit; font-size: 16px;
+    padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+  }
+
+  main {
+    flex: 1; display: flex; gap: 12px; padding: 12px; overflow: hidden;
+  }
+
+  .sidebar {
+    width: 240px; display: flex; flex-direction: column; gap: 12px;
+    flex-shrink: 0;
+  }
+  .sidebar-section {
+    background: white; border-radius: 10px; padding: 10px;
+    display: flex; flex-direction: column; min-height: 0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .sidebar-section h2 {
+    margin: 0 0 8px 0; font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280;
+  }
+  #roster-section { flex: 1; }
+  #subbed-section { flex: 1; }
+  .zone {
+    flex: 1; min-height: 60px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px; border-radius: 6px;
+    background: #f9fafb;
+  }
+  .zone.drag-over { background: #dbeafe; }
+
+  .field {
+    flex: 1; background: #15803d;
+    background-image: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.1) 100%);
+    border: 3px solid white; border-radius: 12px;
+    display: flex; flex-direction: column; justify-content: space-around;
+    padding: 16px; gap: 12px;
+    position: relative; overflow: hidden;
+  }
+  /* Center circle (half) at top — top edge of field represents the midfield line */
+  .field::before {
+    content: ""; position: absolute;
+    top: -70px; left: 50%; transform: translateX(-50%);
+    width: 140px; height: 140px;
+    border: 2px solid rgba(255,255,255,0.7);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  /* Penalty box around the goalie at the bottom */
+  .field::after {
+    content: ""; position: absolute;
+    bottom: 0; left: 18%; right: 18%;
+    height: 150px;
+    border: 2px solid rgba(255,255,255,0.7);
+    border-bottom: none;
+    pointer-events: none;
+  }
+  /* Six-yard (goal) box */
+  .goal-box {
+    position: absolute;
+    bottom: 0; left: 35%; right: 35%;
+    height: 70px;
+    border: 2px solid rgba(255,255,255,0.7);
+    border-bottom: none;
+    pointer-events: none;
+  }
+  .field-row {
+    display: flex; justify-content: space-around; align-items: center;
+    gap: 12px;
+  }
+  .slot {
+    flex: 1; max-width: 220px;
+    background: rgba(255,255,255,0.85);
+    border: 2px dashed rgba(255,255,255,0.6);
+    border-radius: 10px;
+    min-height: 64px;
+    padding: 4px;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .slot-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    color: #374151; letter-spacing: 0.05em; text-align: center;
+    padding: 2px 0;
+  }
+  .slot-dropzone {
+    flex: 1; min-height: 40px; display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+  }
+  .slot-dropzone.drag-over { background: #fef3c7; }
+  .slot-dropzone:empty::after {
+    content: "(empty)"; font-size: 12px; color: #9ca3af; font-style: italic;
+  }
+
+  .player {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; background: white;
+    border: 1px solid #e5e7eb; border-radius: 8px;
+    font-size: 15px; font-weight: 500;
+    cursor: grab; touch-action: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    min-height: 44px;
+  }
+  .slot-dropzone .player {
+    width: 100%; background: #1e40af; color: white; border-color: #1e3a8a;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+  }
+  #subbed-out .player { background: #fef2f2; border-color: #fecaca; }
+
+  .player.sortable-chosen { cursor: grabbing; }
+  .player.sortable-ghost { opacity: 0.4; }
+  .player.sortable-drag { box-shadow: 0 8px 16px rgba(0,0,0,0.25); }
+
+  .player-name { flex: 1; }
+  .sub-badge {
+    background: #ef4444; color: white;
+    font-size: 12px; font-weight: 700;
+    min-width: 22px; height: 22px; padding: 0 6px;
+    border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .sub-badge.zero { display: none; }
+  .slot-dropzone .sub-badge { background: #fbbf24; color: #78350f; }
+
+  .player-remove {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #fee2e2; color: #b91c1c; border: none;
+    font-size: 16px; line-height: 1; padding: 0;
+    display: none; align-items: center; justify-content: center;
+    cursor: pointer; min-height: 24px;
+  }
+  body.edit-mode .player-remove { display: flex; }
+  body.edit-mode .player { cursor: default; }
+
+  @media (max-width: 900px) {
+    main { flex-direction: column; overflow-y: auto; }
+    .sidebar { width: 100%; flex-direction: row; }
+    .sidebar-section { flex: 1; max-height: 280px; }
+    .field { min-height: 520px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚽ Soccer Coach</h1>
+  <div class="actions">
+    <button id="edit-btn" class="secondary">Edit</button>
+    <button id="reset-positions-btn" class="secondary">Reset Positions</button>
+    <button id="new-game-btn" class="danger">New Game</button>
+  </div>
+</header>
+
+<section class="controls">
+  <input id="name-input" type="text" placeholder="Add player (comma-separated OK)" autocomplete="off">
+  <button id="add-btn">Add</button>
+  <button id="shuffle-btn" class="secondary">Shuffle Roster</button>
+</section>
+
+<main>
+  <section class="field">
+    <div class="goal-box"></div>
+    <div class="field-row">
+      <div class="slot">
+        <div class="slot-label">Left Forward</div>
+        <div class="slot-dropzone" data-pos="FWD-L"></div>
+      </div>
+      <div class="slot">
+        <div class="slot-label">Right Forward</div>
+        <div class="slot-dropzone" data-pos="FWD-R"></div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="slot">
+        <div class="slot-label">Left Mid</div>
+        <div class="slot-dropzone" data-pos="MID-L"></div>
+      </div>
+      <div class="slot">
+        <div class="slot-label">Center Mid</div>
+        <div class="slot-dropzone" data-pos="MID-C"></div>
+      </div>
+      <div class="slot">
+        <div class="slot-label">Right Mid</div>
+        <div class="slot-dropzone" data-pos="MID-R"></div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="slot">
+        <div class="slot-label">Left Back</div>
+        <div class="slot-dropzone" data-pos="DEF-L"></div>
+      </div>
+      <div class="slot">
+        <div class="slot-label">Center Back</div>
+        <div class="slot-dropzone" data-pos="DEF-C"></div>
+      </div>
+      <div class="slot">
+        <div class="slot-label">Right Back</div>
+        <div class="slot-dropzone" data-pos="DEF-R"></div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="slot" style="max-width: 180px;">
+        <div class="slot-label">Goalie</div>
+        <div class="slot-dropzone" data-pos="GK"></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <div class="sidebar-section" id="roster-section">
+      <h2>Roster / Bench</h2>
+      <div class="zone" id="roster"></div>
+    </div>
+    <div class="sidebar-section" id="subbed-section">
+      <h2>Subbed Out</h2>
+      <div class="zone" id="subbed-out"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const STORAGE_KEY = "soccer-coach-state-v1";
+  const POSITIONS = ["FWD-L","FWD-R","MID-L","MID-C","MID-R","DEF-L","DEF-C","DEF-R","GK"];
+
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+  let nextId = 1;
+
+  function createPlayerEl(id, name, subCount=0) {
+    const el = document.createElement("div");
+    el.className = "player";
+    el.dataset.id = String(id);
+    el.dataset.subCount = String(subCount);
+    el.innerHTML = `
+      <button class="player-remove" title="Remove">×</button>
+      <span class="player-name"></span>
+      <span class="sub-badge${subCount === 0 ? " zero" : ""}">${subCount}</span>
+    `;
+    $(".player-name", el).textContent = name;
+    $(".player-remove", el).addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (confirm(`Remove ${name}?`)) {
+        el.remove();
+        saveState();
+      }
+    });
+    $(".sub-badge", el).addEventListener("click", (e) => {
+      e.stopPropagation();
+      const count = parseInt(el.dataset.subCount || "0", 10);
+      if (count === 0) return;
+      if (confirm(`Reset ${name}'s sub count?`)) {
+        el.dataset.subCount = "0";
+        updateBadge(el);
+        saveState();
+      }
+    });
+    return el;
+  }
+
+  function updateBadge(el) {
+    const count = parseInt(el.dataset.subCount || "0", 10);
+    const badge = $(".sub-badge", el);
+    badge.textContent = String(count);
+    badge.classList.toggle("zero", count === 0);
+  }
+
+  function isFieldZone(zone) {
+    return zone.classList.contains("slot-dropzone");
+  }
+
+  function handleDrop(evt) {
+    const target = evt.to;
+    const source = evt.from;
+    const addedEl = evt.item;
+
+    // If dropped into a field slot that now has >1 item, swap the other back to source
+    if (isFieldZone(target)) {
+      const others = Array.from(target.children).filter(c => c !== addedEl);
+      if (others.length > 0) {
+        others.forEach(o => source.appendChild(o));
+      }
+    }
+
+    // If dropped into subbed-out from a field position, increment sub count
+    if (target.id === "subbed-out" && isFieldZone(source)) {
+      const n = parseInt(addedEl.dataset.subCount || "0", 10) + 1;
+      addedEl.dataset.subCount = String(n);
+      updateBadge(addedEl);
+    }
+
+    saveState();
+  }
+
+  function setupSortable(zone) {
+    return Sortable.create(zone, {
+      group: "players",
+      animation: 150,
+      delay: 120,
+      delayOnTouchOnly: true,
+      touchStartThreshold: 4,
+      forceFallback: true,
+      fallbackTolerance: 4,
+      ghostClass: "sortable-ghost",
+      chosenClass: "sortable-chosen",
+      dragClass: "sortable-drag",
+      onAdd: handleDrop,
+      onEnd: () => saveState(),
+      onUpdate: () => saveState(),
+    });
+  }
+
+  function initSortables() {
+    setupSortable($("#roster"));
+    setupSortable($("#subbed-out"));
+    $$(".slot-dropzone").forEach(setupSortable);
+  }
+
+  function addPlayers(text) {
+    const names = text.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+    names.forEach(name => {
+      const el = createPlayerEl(nextId++, name, 0);
+      $("#roster").appendChild(el);
+    });
+    saveState();
+  }
+
+  function shuffleRoster() {
+    const roster = $("#roster");
+    const items = Array.from(roster.children);
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    items.forEach(el => roster.appendChild(el));
+    saveState();
+  }
+
+  function saveState() {
+    const players = {};
+    $$(".player").forEach(el => {
+      players[el.dataset.id] = {
+        name: $(".player-name", el).textContent,
+        subCount: parseInt(el.dataset.subCount || "0", 10),
+      };
+    });
+    const roster = $$("#roster .player").map(el => el.dataset.id);
+    const subbedOut = $$("#subbed-out .player").map(el => el.dataset.id);
+    const positions = {};
+    $$(".slot-dropzone").forEach(zone => {
+      const p = $(".player", zone);
+      if (p) positions[zone.dataset.pos] = p.dataset.id;
+    });
+    const state = { nextId, players, roster, subbedOut, positions };
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch (e) { console.warn("save failed", e); }
+  }
+
+  function loadState() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    let state;
+    try { state = JSON.parse(raw); } catch { return; }
+    if (!state || !state.players) return;
+
+    nextId = state.nextId || 1;
+
+    (state.roster || []).forEach(id => {
+      const p = state.players[id];
+      if (p) $("#roster").appendChild(createPlayerEl(id, p.name, p.subCount));
+    });
+    (state.subbedOut || []).forEach(id => {
+      const p = state.players[id];
+      if (p) $("#subbed-out").appendChild(createPlayerEl(id, p.name, p.subCount));
+    });
+    Object.entries(state.positions || {}).forEach(([pos, id]) => {
+      const p = state.players[id];
+      const zone = $(`.slot-dropzone[data-pos="${pos}"]`);
+      if (p && zone) zone.appendChild(createPlayerEl(id, p.name, p.subCount));
+    });
+  }
+
+  function resetPositions() {
+    if (!confirm("Reset positions? All players go to the bench and sub counts are cleared.")) return;
+    const roster = $("#roster");
+    $$(".player").forEach(el => {
+      el.dataset.subCount = "0";
+      updateBadge(el);
+      roster.appendChild(el);
+    });
+    saveState();
+  }
+
+  function newGame() {
+    if (!confirm("Start a new game? This clears all players and sub counts.")) return;
+    localStorage.removeItem(STORAGE_KEY);
+    $$(".player").forEach(el => el.remove());
+    nextId = 1;
+  }
+
+  function toggleEditMode() {
+    document.body.classList.toggle("edit-mode");
+    const btn = $("#edit-btn");
+    btn.textContent = document.body.classList.contains("edit-mode") ? "Done" : "Edit";
+  }
+
+  // Event wiring
+  $("#add-btn").addEventListener("click", () => {
+    const input = $("#name-input");
+    const v = input.value.trim();
+    if (v) { addPlayers(v); input.value = ""; }
+    input.focus();
+  });
+  $("#name-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("#add-btn").click(); }
+  });
+  $("#shuffle-btn").addEventListener("click", shuffleRoster);
+  $("#reset-positions-btn").addEventListener("click", resetPositions);
+  $("#new-game-btn").addEventListener("click", newGame);
+  $("#edit-btn").addEventListener("click", toggleEditMode);
+
+  // Init
+  loadState();
+  initSortables();
+})();
+</script>
+</body>
+</html>
