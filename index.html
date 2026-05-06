@@ -36,6 +36,18 @@
   button.danger { background: #dc2626; }
   button:active { opacity: 0.8; }
 
+  .game-clock {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px; background: #fff; border-bottom: 1px solid #e5e7eb;
+  }
+  .clock-display {
+    font-size: 28px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #1f2937; min-width: 90px;
+  }
+  .clock-display.running { color: #15803d; }
+  #clock-btn { min-width: 110px; }
+
   .controls {
     display: flex; gap: 8px; padding: 10px 16px;
     background: white; border-bottom: 1px solid #e5e7eb;
@@ -156,6 +168,17 @@
   .player.sortable-drag { box-shadow: 0 8px 16px rgba(0,0,0,0.25); }
 
   .player-name { flex: 1; }
+  .play-time {
+    font-size: 12px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #6b7280;
+    background: #f3f4f6;
+    padding: 2px 6px; border-radius: 6px;
+    min-width: 44px; text-align: center;
+  }
+  .play-time.active { color: #065f46; background: #d1fae5; }
+  .slot-dropzone .play-time { background: rgba(255,255,255,0.2); color: #ecfccb; }
+  .slot-dropzone .play-time.active { background: #bbf7d0; color: #064e3b; }
   .sub-badge {
     background: #ef4444; color: white;
     font-size: 12px; font-weight: 700;
@@ -195,6 +218,12 @@
     <button id="new-game-btn" class="danger">New Game</button>
   </div>
 </header>
+
+<section class="game-clock">
+  <div id="clock-display" class="clock-display">00:00</div>
+  <button id="clock-btn">Start Game</button>
+  <button id="clock-reset-btn" class="secondary">Reset Clock</button>
+</section>
 
 <section class="controls">
   <input id="name-input" type="text" placeholder="Add player (comma-separated OK)" autocomplete="off">
@@ -272,18 +301,123 @@
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
   let nextId = 1;
+  // Game clock: elapsedMs is accumulated time while paused; runningSince is the timestamp
+  // when the current run segment began (null when paused).
+  const clock = { elapsedMs: 0, runningSince: null };
 
-  function createPlayerEl(id, name, subCount=0) {
+  function fmtMs(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }
+
+  function clockElapsedMs() {
+    return clock.elapsedMs + (clock.runningSince ? Date.now() - clock.runningSince : 0);
+  }
+
+  function isOnField(el) {
+    return el.parentElement && el.parentElement.classList.contains("slot-dropzone");
+  }
+
+  function playerIsActive(el) {
+    return clock.runningSince !== null && isOnField(el);
+  }
+
+  // Flush the current segment for a player (if any) into their accumulated playMs.
+  function flushPlayer(el) {
+    const segStart = el.dataset.segmentStart ? parseInt(el.dataset.segmentStart, 10) : 0;
+    if (segStart) {
+      const accumulated = parseInt(el.dataset.playMs || "0", 10);
+      el.dataset.playMs = String(accumulated + (Date.now() - segStart));
+      el.dataset.segmentStart = "";
+    }
+  }
+
+  // Recompute which players should currently be timing. Flush any that shouldn't be,
+  // start segments for any that should.
+  function syncPlayerTimers() {
+    $$(".player").forEach(el => {
+      const shouldRun = playerIsActive(el);
+      const segStart = el.dataset.segmentStart ? parseInt(el.dataset.segmentStart, 10) : 0;
+      if (shouldRun && !segStart) {
+        el.dataset.segmentStart = String(Date.now());
+      } else if (!shouldRun && segStart) {
+        flushPlayer(el);
+      }
+      updatePlayTime(el);
+    });
+  }
+
+  function updatePlayTime(el) {
+    const pill = $(".play-time", el);
+    if (!pill) return;
+    const accumulated = parseInt(el.dataset.playMs || "0", 10);
+    const segStart = el.dataset.segmentStart ? parseInt(el.dataset.segmentStart, 10) : 0;
+    const total = accumulated + (segStart ? Date.now() - segStart : 0);
+    pill.textContent = fmtMs(total);
+    pill.classList.toggle("active", segStart > 0);
+  }
+
+  function updateClockDisplay() {
+    const display = $("#clock-display");
+    display.textContent = fmtMs(clockElapsedMs());
+    display.classList.toggle("running", clock.runningSince !== null);
+    const btn = $("#clock-btn");
+    btn.textContent = clock.runningSince !== null ? "Pause" : (clock.elapsedMs > 0 ? "Resume" : "Start Game");
+    btn.classList.toggle("danger", clock.runningSince !== null);
+  }
+
+  function tick() {
+    updateClockDisplay();
+    $$(".player").forEach(updatePlayTime);
+  }
+
+  function startClock() {
+    if (clock.runningSince !== null) return;
+    clock.runningSince = Date.now();
+    syncPlayerTimers();
+    updateClockDisplay();
+    saveState();
+  }
+
+  function pauseClock() {
+    if (clock.runningSince === null) return;
+    clock.elapsedMs += Date.now() - clock.runningSince;
+    clock.runningSince = null;
+    syncPlayerTimers();
+    updateClockDisplay();
+    saveState();
+  }
+
+  function toggleClock() {
+    if (clock.runningSince === null) startClock(); else pauseClock();
+  }
+
+  function resetClock() {
+    if (!confirm("Reset the game clock to 00:00? Player play-times are kept.")) return;
+    clock.elapsedMs = 0;
+    clock.runningSince = null;
+    $$(".player").forEach(el => { el.dataset.segmentStart = ""; });
+    updateClockDisplay();
+    $$(".player").forEach(updatePlayTime);
+    saveState();
+  }
+
+  function createPlayerEl(id, name, subCount=0, playMs=0) {
     const el = document.createElement("div");
     el.className = "player";
     el.dataset.id = String(id);
     el.dataset.subCount = String(subCount);
+    el.dataset.playMs = String(playMs);
     el.innerHTML = `
       <button class="player-remove" title="Remove">×</button>
       <span class="player-name"></span>
+      <span class="play-time">00:00</span>
       <span class="sub-badge${subCount === 0 ? " zero" : ""}">${subCount}</span>
     `;
     $(".player-name", el).textContent = name;
+    updatePlayTime(el);
     $(".player-remove", el).addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm(`Remove ${name}?`)) {
@@ -335,6 +469,7 @@
       updateBadge(addedEl);
     }
 
+    syncPlayerTimers();
     saveState();
   }
 
@@ -385,9 +520,13 @@
   function saveState() {
     const players = {};
     $$(".player").forEach(el => {
+      const seg = el.dataset.segmentStart ? parseInt(el.dataset.segmentStart, 10) : 0;
+      const accumulated = parseInt(el.dataset.playMs || "0", 10);
+      const playMs = accumulated + (seg ? Date.now() - seg : 0);
       players[el.dataset.id] = {
         name: $(".player-name", el).textContent,
         subCount: parseInt(el.dataset.subCount || "0", 10),
+        playMs,
       };
     });
     const roster = $$("#roster .player").map(el => el.dataset.id);
@@ -397,7 +536,11 @@
       const p = $(".player", zone);
       if (p) positions[zone.dataset.pos] = p.dataset.id;
     });
-    const state = { nextId, players, roster, subbedOut, positions };
+    const clockState = {
+      elapsedMs: clockElapsedMs(),
+      running: clock.runningSince !== null,
+    };
+    const state = { nextId, players, roster, subbedOut, positions, clock: clockState };
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { console.warn("save failed", e); }
   }
@@ -413,35 +556,48 @@
 
     (state.roster || []).forEach(id => {
       const p = state.players[id];
-      if (p) $("#roster").appendChild(createPlayerEl(id, p.name, p.subCount));
+      if (p) $("#roster").appendChild(createPlayerEl(id, p.name, p.subCount, p.playMs || 0));
     });
     (state.subbedOut || []).forEach(id => {
       const p = state.players[id];
-      if (p) $("#subbed-out").appendChild(createPlayerEl(id, p.name, p.subCount));
+      if (p) $("#subbed-out").appendChild(createPlayerEl(id, p.name, p.subCount, p.playMs || 0));
     });
     Object.entries(state.positions || {}).forEach(([pos, id]) => {
       const p = state.players[id];
       const zone = $(`.slot-dropzone[data-pos="${pos}"]`);
-      if (p && zone) zone.appendChild(createPlayerEl(id, p.name, p.subCount));
+      if (p && zone) zone.appendChild(createPlayerEl(id, p.name, p.subCount, p.playMs || 0));
     });
+
+    // Restore clock as paused at its last known elapsed value. We deliberately do
+    // not credit time spent with the page closed — only active sideline use counts.
+    if (state.clock) {
+      clock.elapsedMs = state.clock.elapsedMs || 0;
+      clock.runningSince = null;
+    }
   }
 
   function resetPositions() {
-    if (!confirm("Reset positions? All players go to the bench and sub counts are cleared.")) return;
+    if (!confirm("Reset positions? All players go to the bench and sub counts and play times are cleared.")) return;
     const roster = $("#roster");
     $$(".player").forEach(el => {
       el.dataset.subCount = "0";
+      el.dataset.playMs = "0";
+      el.dataset.segmentStart = "";
       updateBadge(el);
       roster.appendChild(el);
+      updatePlayTime(el);
     });
     saveState();
   }
 
   function newGame() {
-    if (!confirm("Start a new game? This clears all players and sub counts.")) return;
+    if (!confirm("Start a new game? This clears all players, sub counts, play times, and the game clock.")) return;
     localStorage.removeItem(STORAGE_KEY);
     $$(".player").forEach(el => el.remove());
     nextId = 1;
+    clock.elapsedMs = 0;
+    clock.runningSince = null;
+    updateClockDisplay();
   }
 
   function toggleEditMode() {
@@ -464,10 +620,15 @@
   $("#reset-positions-btn").addEventListener("click", resetPositions);
   $("#new-game-btn").addEventListener("click", newGame);
   $("#edit-btn").addEventListener("click", toggleEditMode);
+  $("#clock-btn").addEventListener("click", toggleClock);
+  $("#clock-reset-btn").addEventListener("click", resetClock);
 
   // Init
   loadState();
   initSortables();
+  updateClockDisplay();
+  $$(".player").forEach(updatePlayTime);
+  setInterval(tick, 1000);
 })();
 </script>
 </body>
